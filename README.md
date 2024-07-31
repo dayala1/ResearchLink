@@ -19,7 +19,7 @@ A number of precomputations are needed for different features. In the `data/` fo
   * **/data/pair2freq.pkl** contains the number of times pairs of entities appear together in research abstracts, per year.
   * **/data/train.txt** contains the entire knowledge graph that can be used for training of relevant techniques.
 * **/test_baselines.py** is a script used to test different baseline models on the CSKG-600 dataset.
-* **/run.py** is the script that computes and stores ResearchLink's features, storing them in **hypotheses_processed.csv**.
+* **/run.py** is the script that computes and stores ResearchLink's features, storing them in **hypotheses_processed.csv**. This script heavily relies on the files in **/data**.
 
 ## How to use
 
