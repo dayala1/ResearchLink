@@ -6,6 +6,28 @@ The hypotheses must be in the file `data/hypotheses.csv` with the following form
 
 A number of precomputations are needed for different features. In the `data/` folder, we provide all of them for the CSKG-600 dataset.
 
+## Contents of the repository
+* **/CSKG-600.csv** contains our validation dataset, containing 600 manually verified research hypotheses.
+* **/data** contains files needed to run ResearchLink, mostly containing metadata needed to compute features:
+  * **/data/compute_embeddings.py** is a script used to compute graph-embeddings of each entity in the graph.
+  * **/data/embeddings_<technique>.npy** contains the pre-computed graph embeddings of each entity in the graph.
+  * **/data/entities.txt** contains a list of entities in the graph including their degree (total, in-degree, out-degree) and type.
+  * **/data/entities_graph_emb.tsv** contains a list of entities with the same index as their corresponding embedding.
+  * **/data/entity2count.json** contains the number of apparition of each entity in research abstracts, per year.
+  * **/data/hypotheses.csv** contains the score assigned by SciCheck to each triple in the CSKG-600 dataset.
+  * **/data/max_cos_sim.csv** contains the maximum cosine similarity of each triple in the CSKG-600 dataset to any other triple in the graph.
+  * **/data/pair2freq.pkl** contains the number of times pairs of entities appear together in research abstracts, per year.
+  * **/data/train.txt** contains the entire knowledge graph that can be used for training of relevant techniques.
+* **/test_baselines.py** is a script used to test different baseline models on the CSKG-600 dataset.
+* **/run.py** is the script that computes and stores ResearchLink's features, storing them in **hypotheses_processed.csv**.
+
+## How to use
+
+1. First, install the required libraries using ```pip install -r requirements.txt```.
+2. Compute the desired graph embeddings by running the compute_embeddings.py script.
+3. Use the run.py script to compute and store ResearchLink's features.
+4. Train any desired model from the computed features.
+
 ## ResearchLink Algorithm for Classifying Research Hypotheses
 
 ### Input
