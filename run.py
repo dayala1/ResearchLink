@@ -1,12 +1,14 @@
 import json
 import pickle
 import re
+import os
 import numpy as np
 from tqdm import tqdm
 from numpy import dot
 from functools import cache
 from numpy.linalg import norm
 from sentence_transformers import SentenceTransformer, util
+import torch
 
 WORD_EMB_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
 RE_PAIRS = re.compile(r"\('(.*?)',\s*'(.*?)'\)")
@@ -88,7 +90,7 @@ def load_max_cos_similarity() :
     return data
 
 def load_graph_embeddings():
-    embeddings_raw = np.load("data/cskg_TransE_l2_entity.npy")
+    embeddings_raw = np.load("data/embeddings_TransH.npy")
     embeddings = {}
     
     with open("data/entities_graph_emb.tsv", "r") as f:
@@ -112,6 +114,17 @@ def encode_entity(ent):
     name = ent.replace("_", " ")
     return WORD_EMB_MODEL.encode(name)
 
+def encode_sentence(s, p, o, as_tensor=False):
+    s = s.replace("_", " ").lower()
+    # replace camelCase in predicate
+    p = re.sub(r'(?<!^)(?=[A-Z])', ' ', p).lower()
+    o = o.replace("_", " ").lower()
+    sentence = f'{s} {p} {o}'
+    embeddings = WORD_EMB_MODEL.encode(sentence, convert_to_tensor=as_tensor)
+    if(as_tensor):
+        embeddings = embeddings.cpu()
+    return embeddings
+
 def word_emb_similarity(s, o):
     emb_s = encode_entity(s)
     emb_o = encode_entity(o)
@@ -121,7 +134,7 @@ def word_emb_similarity(s, o):
 def load_entity_pairs():
     data = {}
 
-    with open("data/pair2freq.pkl", "rb") as f:
+    with open("data/pair2count.pickle", "rb") as f:
         raw_data = pickle.load(f)
         for pair, dist_data in raw_data.items():
             e1 = pair[0].replace(" ", "_")
@@ -133,6 +146,40 @@ def load_entity_pairs():
 
     return data
 
+def load_graph_triples_embeddings(as_tensor=False):
+    if os.path.exists('./data/sentence_embeddings.npy'):
+        embeddings = np.load('./data/sentence_embeddings.npy')
+        if(as_tensor):
+            embeddings = torch.tensor(embeddings)
+    else:
+        sentences = []
+        with open('./data/train.txt', 'r') as f:
+            for line in tqdm(f):
+                s, p, o, l = line.strip().split("\t")
+                s = s.replace("_", " ").lower()
+                # replace camelCase in predicate
+                p = re.sub(r'(?<!^)(?=[A-Z])', ' ', p).lower()
+                o = o.replace("_", " ").lower()
+                sentence = f'{s} {p} {o}'
+                sentences.append((s, p, o))
+        embeddings = WORD_EMB_MODEL.encode(sentences, convert_to_tensor=as_tensor)
+        if(as_tensor):
+            embeddings = embeddings.cpu()
+        # Store in file if it does not exist
+        # Check if ./data/sentence_embeddings.npy exists
+        if not os.path.exists('./data/sentence_embeddings.npy'):
+            if(as_tensor):
+                np.save('./data/sentence_embeddings.npy', embeddings.cpu().numpy())
+            else:
+                np.save('./data/sentence_embeddings.npy', embeddings)
+    return embeddings
+
+def compute_minimum_distance(sentence_embeddings, graph_embeddings):
+    # sentence_embeddings: tensor of shape (embedding_dim)
+    # graph_embeddings: tensor of shape (num_triples, embedding_dim)
+    # returns: minimum cosine distance between sentence and any triple in the graph
+    return np.min(util.pytorch_cos_sim(sentence_embeddings, graph_embeddings).cpu().numpy())
+
 def harm_mean(x, y):
     try:
         return 2 * x * y / (x + y)
@@ -141,11 +188,13 @@ def harm_mean(x, y):
 
 
 def process_hypotheses(hyp_list, ent_type, conns_train, ents_sentences, 
-                       pair_counts, hyp_labels, hyp_scores, cos_sim, graph_embs):
-    header = ["s", "p", "o", "type_s", "type_o", "scicheck_score", "num_connections_train_subject", "num_connections_train_object",
+                       pair_counts, hyp_labels, hyp_scores, cos_sim, graph_triple_embs, graph_embs):
+    '''header = ["s", "p", "o", "type_s", "type_o", "scicheck_score", "num_connections_train_subject", "num_connections_train_object",
               "freq_abstracts_subject", "freq_abstracts_object", "harmomic_mean_frequences",
-              "freq_abstracts_s&o", "max_cos_sim", "graph_emb_similarity", "word_emb_similarity", "label"]
-
+              "freq_abstracts_s&o", "max_cos_sim", "graph_emb_similarity", "word_emb_similarity", "label"]'''
+    
+    header = ["s", "p", "o", "type_s", "type_o", "scicheck_score", "num_connections_train_subject", "num_connections_train_object",
+              "freq_abstracts_subject", "freq_abstracts_object", "harmomic_mean_frequences", "freq_abstracts_s&o", "max_cos_sim", "min_emb_sim", "graph_emb_similarity", "word_emb_similarity", "label"]
     with open("hypotheses_processed.csv", "w") as f:
         f.write(",".join(header) + "\n")
         for s, p, o in tqdm(hyp_list):
@@ -164,6 +213,7 @@ def process_hypotheses(hyp_list, ent_type, conns_train, ents_sentences,
             line.append(harm_mean(line[-1], line[-2]))
             line.append(pair_counts.get((s, o), {}).get("total", 0))
             line.append(cos_sim.get((s,p,o), 0.0))
+            line.append(compute_minimum_distance(encode_sentence(s, p, o, as_tensor=True), graph_triple_embs))
             line.append(graph_emb_similarity(s, o, graph_embs))
             line.append(word_emb_similarity(s, o))
             line.append(hyp_labels[(s,p,o)])
@@ -190,12 +240,15 @@ def main():
 
     print("Loading cosine similarity data...")
     cos_sim = load_max_cos_similarity()
+    
+    print("Loading graph triples embeddings...")
+    graph_triple_embs = load_graph_triples_embeddings(as_tensor=True)
 
     print("Processing hypotheses")
     process_hypotheses(hyp_list, ent_type, conns_train, 
                        ents_sentences, pair_counts, 
                        hyp_labels, hyp_scores, cos_sim,
-                       graph_embs)
+                       graph_triple_embs, graph_embs)
 
 if __name__ == "__main__":
     main()
